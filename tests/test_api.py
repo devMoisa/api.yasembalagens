@@ -141,6 +141,65 @@ def test_quote_enforces_package_count(client: TestClient, auth_headers: dict[str
     assert response.status_code == 422
 
 
+def test_product_supports_ordered_gallery(client: TestClient, auth_headers: dict[str, str]):
+    category = client.post(
+        "/api/v1/admin/categories", headers=auth_headers, json={"name": "Sacolas"}
+    ).json()
+
+    media_ids = []
+    for label in ("frente", "verso", "detalhe"):
+        response = client.post(
+            "/api/v1/admin/media",
+            headers=auth_headers,
+            files={"file": (f"{label}.gif", b"GIF89a", "image/gif")},
+        )
+        assert response.status_code == 201
+        media_ids.append(response.json()["id"])
+
+    product = client.post(
+        "/api/v1/admin/products",
+        headers=auth_headers,
+        json={
+            "category_id": category["id"],
+            "name": "Sacola Kraft",
+            "image_ids": media_ids,
+        },
+    ).json()
+    assert [image["media_id"] for image in product["images"]] == media_ids
+    assert product["image"]["id"] == media_ids[0]
+    assert product["image_id"] == media_ids[0]
+
+    reordered = list(reversed(media_ids))
+    patch_response = client.patch(
+        f"/api/v1/admin/products/{product['id']}",
+        headers=auth_headers,
+        json={"image_ids": reordered},
+    )
+    assert patch_response.status_code == 200, patch_response.json()
+    updated = patch_response.json()
+    assert [image["media_id"] for image in updated["images"]] == reordered
+    assert updated["image_id"] == reordered[0]
+
+    trimmed = client.patch(
+        f"/api/v1/admin/products/{product['id']}",
+        headers=auth_headers,
+        json={"image_ids": reordered[:1]},
+    ).json()
+    assert len(trimmed["images"]) == 1
+
+    # Deleting a media referenced by a product must be blocked.
+    still_in_use = client.delete(
+        f"/api/v1/admin/media/{reordered[0]}", headers=auth_headers
+    )
+    assert still_in_use.status_code == 409
+
+    # Deleting the product should succeed even when the gallery has entries.
+    delete_response = client.delete(
+        f"/api/v1/admin/products/{product['id']}", headers=auth_headers
+    )
+    assert delete_response.status_code == 204
+
+
 def test_seed_is_idempotent(db_session: Session):
     seed_database(db_session, include_assets=False)
     seed_database(db_session, include_assets=False)

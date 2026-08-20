@@ -5,7 +5,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from yas_api.api.dependencies import DbSession, get_current_admin
-from yas_api.models import Banner, Category, Product, ProductBlock, ProductBlockItem
+from yas_api.models import (
+    Banner,
+    Category,
+    Media,
+    Product,
+    ProductBlock,
+    ProductBlockItem,
+    ProductImage,
+)
 from yas_api.schemas.catalog import (
     BannerCreate,
     BannerRead,
@@ -81,42 +89,82 @@ def delete_category(category_id: int, db: DbSession) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/products", response_model=list[ProductRead])
-def list_products(db: DbSession):
-    query = (
+def _product_query():
+    return (
         select(Product)
-        .options(selectinload(Product.image))
+        .options(selectinload(Product.images).selectinload(ProductImage.media))
         .order_by(Product.sort_order, Product.name)
     )
-    return db.scalars(query).all()
+
+
+def _load_product(db: Session, product_id: int) -> Product:
+    query = (
+        select(Product)
+        .where(Product.id == product_id)
+        .options(selectinload(Product.images).selectinload(ProductImage.media))
+    )
+    product = db.scalar(query)
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produto nao encontrado")
+    return product
+
+
+def _replace_product_images(db: Session, product: Product, media_ids: list[int]) -> None:
+    if len(media_ids) != len(set(media_ids)):
+        raise HTTPException(status_code=422, detail="A mesma imagem foi enviada mais de uma vez")
+    if media_ids:
+        existing = set(db.scalars(select(Media.id).where(Media.id.in_(media_ids))).all())
+        missing = [media_id for media_id in media_ids if media_id not in existing]
+        if missing:
+            raise HTTPException(status_code=422, detail=f"Imagens inexistentes: {missing}")
+    # Clear + flush so the DELETEs run before the new INSERTs (avoids collisions on the
+    # (product_id, media_id) unique constraint when a media_id appears in both sets).
+    product.images = []
+    db.flush()
+    product.images = [
+        ProductImage(media_id=media_id, position=position)
+        for position, media_id in enumerate(media_ids)
+    ]
+
+
+@router.get("/products", response_model=list[ProductRead])
+def list_products(db: DbSession):
+    return db.scalars(_product_query()).all()
 
 
 @router.post("/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 def create_product(payload: ProductCreate, db: DbSession):
-    values = payload.model_dump()
+    values = payload.model_dump(exclude={"image_ids"})
     values["slug"] = slugify(payload.slug or payload.name)
     product = Product(**values)
     db.add(product)
+    _replace_product_images(db, product, payload.image_ids)
     commit_or_conflict(db)
-    db.refresh(product)
-    return product
+    return _load_product(db, product.id)
 
 
 @router.patch("/products/{product_id}", response_model=ProductRead)
 def update_product(product_id: int, payload: ProductUpdate, db: DbSession):
-    product = get_or_404(db, Product, product_id)
-    update_instance(product, payload)
+    product = _load_product(db, product_id)
+    values = payload.model_dump(exclude_unset=True, exclude={"image_ids"})
+    for field, value in values.items():
+        setattr(product, field, value)
     if payload.slug is not None:
         product.slug = slugify(payload.slug)
+    if payload.image_ids is not None:
+        _replace_product_images(db, product, payload.image_ids)
     commit_or_conflict(db)
-    db.refresh(product)
-    return product
+    return _load_product(db, product.id)
 
 
 @router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(product_id: int, db: DbSession) -> Response:
-    db.delete(get_or_404(db, Product, product_id))
-    commit_or_conflict(db)
+    product = get_or_404(db, Product, product_id)
+    # Detach gallery so the RESTRICT on product_images.media_id does not block product removal.
+    product.images = []
+    db.flush()
+    db.delete(product)
+    commit_or_conflict(db, "O produto ainda esta em uso em um bloco ou pedido")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -160,7 +208,8 @@ def load_block(db: Session, block_id: int) -> ProductBlock:
         .options(
             selectinload(ProductBlock.items)
             .selectinload(ProductBlockItem.product)
-            .selectinload(Product.image)
+            .selectinload(Product.images)
+            .selectinload(ProductImage.media)
         )
     )
     block = db.scalar(query)

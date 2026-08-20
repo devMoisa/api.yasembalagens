@@ -6,6 +6,7 @@ from yas_api.models.catalog import (
     Product,
     ProductBlock,
     ProductBlockItem,
+    ProductImage,
 )
 from yas_api.models.media import Media
 from yas_api.models.store_settings import StoreSettings
@@ -20,5 +21,6 @@ __all__ = [
     "Product",
     "ProductBlock",
     "ProductBlockItem",
+    "ProductImage",
     "StoreSettings",
 ]

@@ -61,7 +61,6 @@ class Product(TimestampMixin, Base):
     unit_label: Mapped[str] = mapped_column(String(80), default="unidade")
     minimum_quantity: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     delivery_days: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
-    image_id: Mapped[int | None] = mapped_column(ForeignKey("media.id", ondelete="SET NULL"))
     tone: Mapped[ContentTone] = mapped_column(
         Enum(ContentTone, native_enum=False, length=20),
         default=ContentTone.GRAY,
@@ -73,7 +72,32 @@ class Product(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     category: Mapped[Category] = relationship(back_populates="products")
-    image: Mapped[Media | None] = relationship()
+    images: Mapped[list["ProductImage"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductImage.position",
+    )
+
+    @property
+    def image(self) -> Media | None:
+        return self.images[0].media if self.images else None
+
+    @property
+    def image_id(self) -> int | None:
+        return self.images[0].media_id if self.images else None
+
+
+class ProductImage(Base):
+    __tablename__ = "product_images"
+    __table_args__ = (UniqueConstraint("product_id", "media_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
+    media_id: Mapped[int] = mapped_column(ForeignKey("media.id", ondelete="RESTRICT"))
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    product: Mapped["Product"] = relationship(back_populates="images")
+    media: Mapped[Media] = relationship()
 
 
 class ProductBlock(TimestampMixin, Base):

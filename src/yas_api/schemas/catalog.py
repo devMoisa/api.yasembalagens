@@ -49,6 +49,15 @@ class CategoryRead(Timestamped):
     sort_order: int
 
 
+class ProductImageRead(BaseModel):
+    id: int
+    media_id: int
+    position: int
+    media: MediaRead
+
+    model_config = {"from_attributes": True}
+
+
 class ProductCreate(BaseModel):
     category_id: int
     name: str = Field(min_length=1, max_length=180)
@@ -60,7 +69,7 @@ class ProductCreate(BaseModel):
     unit_label: str = Field(default="unidade", min_length=1, max_length=80)
     minimum_quantity: int = Field(default=1, ge=1)
     delivery_days: int = Field(default=3, ge=1, le=365)
-    image_id: int | None = None
+    image_ids: list[int] = Field(default_factory=list)
     tone: ContentTone = ContentTone.GRAY
     badge_text: str | None = Field(default=None, max_length=80)
     is_active: bool = True
@@ -79,7 +88,7 @@ class ProductUpdate(BaseModel):
     unit_label: str | None = Field(default=None, min_length=1, max_length=80)
     minimum_quantity: int | None = Field(default=None, ge=1)
     delivery_days: int | None = Field(default=None, ge=1, le=365)
-    image_id: int | None = None
+    image_ids: list[int] | None = None
     tone: ContentTone | None = None
     badge_text: str | None = Field(default=None, max_length=80)
     is_active: bool | None = None
@@ -100,6 +109,7 @@ class ProductRead(Timestamped):
     delivery_days: int
     image_id: int | None
     image: MediaRead | None
+    images: list[ProductImageRead]
     tone: ContentTone
     badge_text: str | None
     is_active: bool

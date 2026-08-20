@@ -5,7 +5,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from yas_api.api.dependencies import DbSession
-from yas_api.models import Banner, Category, Product, ProductBlock, ProductBlockItem
+from yas_api.models import (
+    Banner,
+    Category,
+    Product,
+    ProductBlock,
+    ProductBlockItem,
+    ProductImage,
+)
 from yas_api.schemas.catalog import (
     BannerRead,
     CategoryRead,
@@ -62,7 +69,8 @@ def storefront(db: DbSession) -> StorefrontRead:
         .options(
             selectinload(ProductBlock.items)
             .selectinload(ProductBlockItem.product)
-            .selectinload(Product.image)
+            .selectinload(Product.images)
+            .selectinload(ProductImage.media)
         )
         .order_by(ProductBlock.sort_order, ProductBlock.title)
     )
@@ -83,7 +91,7 @@ def products(
     category: str | None = None,
     search: str | None = Query(default=None, min_length=2, max_length=100),
 ):
-    query = select(Product).where(Product.is_active.is_(True)).options(selectinload(Product.image))
+    query = select(Product).where(Product.is_active.is_(True)).options(selectinload(Product.images).selectinload(ProductImage.media))
     if category:
         query = query.join(Product.category).where(Category.slug == category)
     if search:
@@ -96,7 +104,7 @@ def product_detail(slug: str, db: DbSession):
     query = (
         select(Product)
         .where(Product.slug == slug, Product.is_active.is_(True))
-        .options(selectinload(Product.image))
+        .options(selectinload(Product.images).selectinload(ProductImage.media))
     )
     product = db.scalar(query)
     if product is None:
